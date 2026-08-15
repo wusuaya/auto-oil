@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
-import sys
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -10,12 +9,9 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+ROOT = Path(__file__).resolve().parent
 
-from auto_oil.paper_trading import ContractSpec, PaperAccount  # noqa: E402
+from paper_trading import ContractSpec, PaperAccount  # noqa: E402
 
 
 DATA_DIR = ROOT / "data" / "processed" / "sc_main" / "bars_1m"
