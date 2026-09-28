@@ -88,7 +88,7 @@ class ReplaySession:
         else:
             self.equity_curve.append(point)
 
-    def execute(self, side, quantity, price, bar, spec, note):
+    def execute(self, side, quantity, price, bar, spec, note, offset="auto"):
         return self.account.execute_market(
             side,
             quantity,
@@ -98,13 +98,35 @@ class ReplaySession:
             str(bar.contract),
             spec,
             note,
+            offset=offset,
         )
 
     def place(self, side: str, quantity: int, limit: float | None = None):
-        if self.finished:
+        actions = {
+            "open_long": ("buy", "open", "开多"),
+            "open_short": ("sell", "open", "开空"),
+            "close_long": ("sell", "close", "平多"),
+            "close_short": ("buy", "close", "平空"),
+        }
+        side, offset, action = actions.get(side, (side, "auto", "自动开平"))
+        if self.finished and (offset != "close" or limit is not None):
             raise ValueError("本段回放已结束，可平仓或开始新练习。")
-        if side not in {"buy", "sell"} or not isinstance(quantity, int) or quantity < 1:
-            raise ValueError("请输入有效方向和整数手数。")
+        if side not in {"buy", "sell"} or type(quantity) is not int or not 1 <= quantity <= 3:
+            raise ValueError("每笔委托只允许 1–3 手。")
+        if offset == "close":
+            held = sum(
+                lot.contract == str(self.bar.contract) and lot.side == (-1 if side == "buy" else 1)
+                for lot in self.account.positions
+            )
+            reserved = sum(
+                o["手数"]
+                for o in self.orders
+                if o["状态"] == "待成交"
+                and o.get("开平") == "close"
+                and o["方向"] == ("买入" if side == "buy" else "卖出")
+            )
+            if quantity > held - reserved:
+                raise ValueError("可平持仓不足（已扣除待成交平仓委托），请调整手数或先撤单。")
         if limit is not None and (not pd.notna(limit) or limit <= 0):
             raise ValueError("限价必须大于零。")
         order = {
@@ -112,6 +134,8 @@ class ReplaySession:
             "提交时间": self.bar["dt"],
             "合约": str(self.bar.contract),
             "方向": "买入" if side == "buy" else "卖出",
+            "操作": action,
+            "开平": offset,
             "手数": quantity,
             "类型": "市价" if limit is None else "限价",
             "委托价": limit,
@@ -129,6 +153,7 @@ class ReplaySession:
                     self.bar,
                     self.spec,
                     "回放市价：已揭示收盘价加减滑点",
+                    offset=offset,
                 )
                 order.update(
                     {"状态": "已成交", "成交时间": self.bar["dt"], "成交价": fills[0].price}
@@ -146,11 +171,13 @@ class ReplaySession:
 
     def flatten(self, note="手动平仓"):
         bar = self.bar
-        net = self.account.net_position(str(bar.contract))
-        if net:
-            self.execute(
-                "sell" if net > 0 else "buy", abs(net), float(bar.close), bar, self.spec, note
+        for direction, side in [(1, "sell"), (-1, "buy")]:
+            quantity = sum(
+                lot.contract == str(bar.contract) and lot.side == direction
+                for lot in self.account.positions
             )
+            if quantity:
+                self.execute(side, quantity, float(bar.close), bar, self.spec, note, offset="close")
         self.record_equity()
 
     def advance(self, steps: int = 1):
@@ -181,6 +208,7 @@ class ReplaySession:
                         bar,
                         replace(self.spec, slippage_ticks=0),
                         "限价触及模拟成交",
+                        offset=order.get("开平", "auto"),
                     )
                     order.update(
                         {"状态": "已成交", "成交时间": bar["dt"], "成交价": fills[0].price}

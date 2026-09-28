@@ -24,7 +24,8 @@ st.markdown(
 .stApp {background:#111318;color:#d6d8df}
 [data-testid="stHeader"] {background:#111318}
 [data-testid="stSidebar"] {background:#171a20;border-right:1px solid #333740}
-.block-container {padding-top:1.1rem;padding-bottom:1rem;padding-left:1.5rem;padding-right:1.5rem;max-width:2400px}
+.block-container {padding-top:3.4rem;padding-bottom:1rem;padding-left:1.5rem;padding-right:1.5rem;max-width:2400px}
+[data-testid="stVerticalBlock"] {gap:0.6rem}
 [data-testid="stMetric"] {background:#181c23;border:1px solid #333740;padding:7px 12px;border-radius:2px}
 [data-testid="stMetricValue"] {font-size:20px}
 [data-testid="stToolbar"] {display:none}
@@ -58,10 +59,11 @@ if data.empty:
     st.stop()
 
 earliest, latest = data.dt.iloc[0], data.dt.iloc[-1]
-with st.sidebar:
-    st.subheader("练习设置")
-    st.caption("SC 原油主连 · 历史行情回放")
-    mode = st.radio("时间选择", ["自定义时段", "随机时段"], horizontal=True)
+st.markdown("# 原油模拟交易")
+st.caption("行情终端 v3 · 开多 / 开空 / 平多 / 平空 · 每笔 1–3 手")
+settings = st.columns([1.5, 1.4, 1.8, 1.5])
+with settings[0].popover("手动设置时间段", width="stretch"):
+    st.caption("北京时间；应用后会清空持仓、委托和成交记录，重新开始练习。")
     default_start = max(earliest.date(), (latest - pd.Timedelta(days=7)).date())
     start_date = st.date_input(
         "开始日期", default_start, min_value=earliest.date(), max_value=latest.date()
@@ -69,14 +71,23 @@ with st.sidebar:
     end_date = st.date_input(
         "结束日期", latest.date(), min_value=earliest.date(), max_value=latest.date()
     )
-    if mode == "自定义时段":
-        a, b = st.columns(2)
-        start_time = a.time_input("开始时间", time(9, 0))
-        end_time = b.time_input("结束时间", time(23, 59))
-    else:
-        duration = st.selectbox("随机时长（有行情日期数）", [1, 3, 5, 10, 20], index=0)
-        whole_history = st.checkbox("从 2025 年至今全部行情抽取", value=True)
-        st.caption("取消勾选后，仅在上面设置的日期范围内随机抽取。")
+    a, b = st.columns(2)
+    start_time = a.time_input("开始时间", time(9, 0))
+    end_time = b.time_input("结束时间", time(23, 59))
+    manual_reset = st.button("应用时间段并重置", type="primary", width="stretch")
+duration = settings[1].selectbox(
+    "随机时长（有行情日期数）", [1, 3, 5, 10, 20], label_visibility="collapsed"
+)
+random_scope = settings[2].selectbox(
+    "随机抽取范围", ["2025 年至今", "手动设置的日期范围"], label_visibility="collapsed"
+)
+random_reset = settings[3].button("随机重置时间段", type="primary", width="stretch")
+st.caption(
+    f"随机时长：{duration} 个有行情日期 · 范围：{random_scope}。两种重置都会清空本次账户与交易记录。"
+)
+new_session = manual_reset or random_reset
+with st.sidebar:
+    st.subheader("账户与模拟参数")
     initial_cash = st.number_input(
         "初始资金（元）",
         min_value=10_000.0,
@@ -91,10 +102,6 @@ with st.sidebar:
         close_fee = st.number_input("平昨手续费（元/手）", 0.0, 1000.0, 20.0, 1.0)
         today_fee = st.number_input("平今手续费（元/手）", 0.0, 1000.0, 0.0, 1.0)
         slip = st.number_input("市价滑点（跳）", 0, 20, 1)
-    new_session = st.button(
-        "随机开始新练习" if mode == "随机时段" else "开始新练习", type="primary", width="stretch"
-    )
-    st.caption("开始新练习会清空本次账户；切换 K 线周期不会重置。")
     st.divider()
     st.caption(
         f"本地数据覆盖\n\n{earliest:%Y-%m-%d %H:%M} 至\n\n{latest:%Y-%m-%d %H:%M}\n\n{len(data):,} 根 1 分钟线 · 北京时间"
@@ -103,11 +110,13 @@ with st.sidebar:
 
 if new_session or "replay" not in st.session_state:
     try:
-        if end_date < start_date and not (mode == "随机时段" and whole_history):
+        if end_date < start_date and not (random_reset and random_scope == "2025 年至今"):
             raise ValueError("结束日期不能早于开始日期。")
-        if mode == "随机时段":
+        if random_reset:
             pool = (
-                data if whole_history else data.loc[data.dt.dt.date.between(start_date, end_date)]
+                data
+                if random_scope == "2025 年至今"
+                else data.loc[data.dt.dt.date.between(start_date, end_date)]
             )
             start_at, end_at = random_window(pool, duration)
         else:
@@ -144,14 +153,8 @@ if new_session or "replay" not in st.session_state:
 st.session_state.setdefault("chart_session_id", uuid4().hex)
 session: ReplaySession = st.session_state.replay
 account, spec = session.account, session.spec
-title, status = st.columns([5, 2])
-title.markdown("# 原油模拟交易")
-status.markdown(
-    '<div style="text-align:right;padding-top:14px"><span class="badge">行情终端 v2 · 模拟账户</span></div>',
-    unsafe_allow_html=True,
-)
 st.caption(
-    f"本次练习 {session.bars.dt.iloc[0]:%Y-%m-%d %H:%M} — {session.bars.dt.iloc[-1]:%Y-%m-%d %H:%M}　｜　红涨绿跌 · 先平后开"
+    f"本次练习 {session.bars.dt.iloc[0]:%Y-%m-%d %H:%M} — {session.bars.dt.iloc[-1]:%Y-%m-%d %H:%M}　｜　红涨绿跌 · 开平独立"
 )
 
 controls = st.columns([1.4, 1, 1, 1, 1.3, 2.5])
@@ -227,7 +230,14 @@ with right:
     order_type = st.radio(
         "委托类型", ["市价", "限价"], horizontal=True, label_visibility="collapsed"
     )
-    quantity = st.number_input("交易手数", 1, 100, 1)
+    quantity = st.radio(
+        "委托手数（每笔最多 3 手）",
+        options=[1, 2, 3],
+        index=0,
+        horizontal=True,
+        format_func=lambda n: f"{n} 手",
+        key="order_quantity",
+    )
     if "limit_input" not in st.session_state:
         st.session_state.limit_input = round(price, 1)
     limit_price = st.number_input(
@@ -236,18 +246,46 @@ with right:
     st.caption(
         f"约需保证金 {price * spec.multiplier * spec.margin_rate * quantity:,.0f} 元（新开仓）"
     )
-    buy, sell = st.columns(2)
-    side = (
-        "buy"
-        if buy.button("买入 / 平空", key="buy", width="stretch", disabled=session.finished)
-        else None
+    long_qty = sum(lot.side == 1 and lot.contract == str(bar.contract) for lot in account.positions)
+    short_qty = sum(
+        lot.side == -1 and lot.contract == str(bar.contract) for lot in account.positions
     )
-    if sell.button("卖出 / 平多", key="sell", width="stretch", disabled=session.finished):
-        side = "sell"
-    if side:
+    reserved_long = sum(
+        o["手数"] for o in session.orders if o["状态"] == "待成交" and o.get("操作") == "平多"
+    )
+    reserved_short = sum(
+        o["手数"] for o in session.orders if o["状态"] == "待成交" and o.get("操作") == "平空"
+    )
+    buy, sell = st.columns(2)
+    action = None
+    if buy.button("开多", key="buy", width="stretch", disabled=session.finished):
+        action = "open_long"
+    if sell.button("开空", key="sell", width="stretch", disabled=session.finished):
+        action = "open_short"
+    close_l, close_s = st.columns(2)
+    close_disabled = session.finished and order_type == "限价"
+    if close_l.button(
+        "平多",
+        key="close_long",
+        width="stretch",
+        disabled=close_disabled or quantity > long_qty - reserved_long,
+    ):
+        action = "close_long"
+    if close_s.button(
+        "平空",
+        key="close_short",
+        width="stretch",
+        disabled=close_disabled or quantity > short_qty - reserved_short,
+    ):
+        action = "close_short"
+    st.caption(f"多仓 {long_qty} 手 · 空仓 {short_qty} 手")
+    st.caption(f"可平多 {long_qty - reserved_long} 手 · 可平空 {short_qty - reserved_short} 手")
+    if action:
         st.session_state.playing = False
         try:
-            session.place(side, int(quantity), float(limit_price) if order_type == "限价" else None)
+            session.place(
+                action, int(quantity), float(limit_price) if order_type == "限价" else None
+            )
             st.session_state.notice = (
                 "委托已成交" if order_type == "市价" else "委托已提交，从下一分钟起撮合"
             )
@@ -260,8 +298,7 @@ with right:
         session.flatten()
         st.session_state.notice = "已平仓，并撤销剩余挂单"
         st.rerun()
-    net = account.net_position()
-    st.caption(f"当前持仓：{'多' if net > 0 else '空' if net < 0 else '无'} {abs(net)} 手")
+    st.caption("开仓不自动平反向仓；平仓不反向开仓。")
     st.caption(f"手续费累计 {account.total_fees:,.2f} 元　｜　滑点 {spec.slippage_ticks:g} 跳")
 
 metrics = st.columns(5)
@@ -357,7 +394,7 @@ with tabs[4]:
     st.markdown(f"""
     - 本地 SC 主连分钟行情，时间统一为北京时间。来源包含历史 CSV、公开行情及清洗数据；source_file 以 IMPUTED 开头的记录是零成交延续补柱。
     - 市价单按当前已揭示收盘价加减 {spec.slippage_ticks:g} 跳成交；限价单从下一分钟开始，以开盘改善价或限价模拟成交。不模拟排队和部分成交。
-    - 反向操作先平仓，超出原持仓的手数再开反向仓；交易日字段用于区分平今、平昨。
+    - 开多、开空分别增加多仓和空仓，允许同时持有；平多、平空仅关闭对应方向，不反向开仓。每笔委托限 1–3 手（不是累计持仓上限）；限价平仓预占对应可平手数。多空保证金按手数相加计算，交易日字段用于区分平今、平昨。
     - 合约乘数 {spec.multiplier} 桶/手，最小跳动 {spec.tick_size} 元。保证金 {spec.margin_rate:.0%}；开仓 / 平昨 / 平今费用为 {spec.open_fee:g} / {spec.close_fee:g} / {spec.close_today_fee:g} 元/手，均为固定练习参数。
     - 主连合约或来源代码变化时，旧持仓按最后可见旧价格平仓并撤单。SC0/SC_MAIN 是连续行情标识，不能等同于可成交合约。
     - 可用资金不足时模拟强平；仅检查每分钟结束时的风险，不模拟盘中逐笔强平或涨跌停无法成交。

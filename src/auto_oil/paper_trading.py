@@ -57,7 +57,9 @@ class PaperAccount:
         return sum(lot.side for lot in lots)
 
     def unrealized_pnl(self, mark_price: float, spec: ContractSpec) -> float:
-        return sum((mark_price - lot.open_price) * lot.side * spec.multiplier for lot in self.positions)
+        return sum(
+            (mark_price - lot.open_price) * lot.side * spec.multiplier for lot in self.positions
+        )
 
     def margin(self, mark_price: float, spec: ContractSpec) -> float:
         return len(self.positions) * mark_price * spec.multiplier * spec.margin_rate
@@ -81,23 +83,36 @@ class PaperAccount:
         contract: str,
         spec: ContractSpec,
         note: str = "市价委托",
+        offset: Literal["auto", "open", "close"] = "auto",
     ) -> list[Fill]:
         if side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
-        if quantity <= 0:
+        if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
             raise ValueError("quantity must be positive")
+        if offset not in {"auto", "open", "close"}:
+            raise ValueError("无效开平标志")
         if market_price <= 0:
             raise ValueError("market_price must be positive")
         direction = 1 if side == "buy" else -1
         fill_price = market_price + direction * spec.slippage_ticks * spec.tick_size
         fill_price = round(fill_price / spec.tick_size) * spec.tick_size
 
-        original = (self.cash, self.realized_pnl, self.total_fees, list(self.positions), list(self.fills))
+        original = (
+            self.cash,
+            self.realized_pnl,
+            self.total_fees,
+            list(self.positions),
+            list(self.fills),
+        )
         generated: list[Fill] = []
         remaining = quantity
         opposite = [
             lot for lot in self.positions if lot.contract == contract and lot.side == -direction
         ]
+        if offset == "close" and quantity > len(opposite):
+            raise ValueError("可平持仓不足，平仓委托不会反向开仓")
+        if offset == "open":
+            opposite = []
         for lot in opposite[:quantity]:
             fee = self._fee_for_close(lot, trading_day, spec)
             pnl = (fill_price - lot.open_price) * lot.side * spec.multiplier
@@ -107,7 +122,18 @@ class PaperAccount:
             self.total_fees += fee
             remaining -= 1
             generated.append(
-                Fill(timestamp, trading_day, contract, side, "平今" if lot.trading_day == trading_day else "平仓", fill_price, 1, fee, pnl, note)
+                Fill(
+                    timestamp,
+                    trading_day,
+                    contract,
+                    side,
+                    "平今" if lot.trading_day == trading_day else "平仓",
+                    fill_price,
+                    1,
+                    fee,
+                    pnl,
+                    note,
+                )
             )
         if remaining:
             fee = remaining * spec.open_fee
@@ -117,7 +143,18 @@ class PaperAccount:
                 PositionLot(direction, fill_price, trading_day, contract) for _ in range(remaining)
             )
             generated.append(
-                Fill(timestamp, trading_day, contract, side, "开仓", fill_price, remaining, fee, 0.0, note)
+                Fill(
+                    timestamp,
+                    trading_day,
+                    contract,
+                    side,
+                    "开仓",
+                    fill_price,
+                    remaining,
+                    fee,
+                    0.0,
+                    note,
+                )
             )
         # Always permit risk-reducing closes, even when the account is insolvent.
         # New exposure must cover both margin and slippage at the market mark.
@@ -139,9 +176,33 @@ class PaperAccount:
         long_qty = sum(lot.side == 1 and lot.contract == contract for lot in self.positions)
         short_qty = sum(lot.side == -1 and lot.contract == contract for lot in self.positions)
         if long_qty:
-            generated.extend(self.execute_market("sell", long_qty, market_price, timestamp, trading_day, contract, spec, "一键平仓"))
+            generated.extend(
+                self.execute_market(
+                    "sell",
+                    long_qty,
+                    market_price,
+                    timestamp,
+                    trading_day,
+                    contract,
+                    spec,
+                    "一键平仓",
+                    offset="close",
+                )
+            )
         if short_qty:
-            generated.extend(self.execute_market("buy", short_qty, market_price, timestamp, trading_day, contract, spec, "一键平仓"))
+            generated.extend(
+                self.execute_market(
+                    "buy",
+                    short_qty,
+                    market_price,
+                    timestamp,
+                    trading_day,
+                    contract,
+                    spec,
+                    "一键平仓",
+                    offset="close",
+                )
+            )
         return generated
 
     def fill_records(self) -> list[dict[str, object]]:
