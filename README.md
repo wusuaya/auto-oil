@@ -1,35 +1,30 @@
-# SC 原油历史模拟交易
+# 原油模拟交易
 
-面向桌面和手机浏览器的 Streamlit 历史模拟交易应用。行情来自仓库内的本地 SC 主连
-1 分钟数据，可切换 1、5、15、30 分钟和日线。
+Streamlit 历史回放训练，支持 2025 年至今本地已有的 SC 主连分钟行情。
 
-## 本地启动
-
-```powershell
-python -m pip install -r requirements.txt
-streamlit run streamlit_app.py
-```
+- 1 分钟 / 5 分钟 K 线；自定义起止日期与时间或随机抽取时段。
+- 市价、限价、撤单、多空持仓、全部平仓、资金曲线和 CSV 导出。
+- 自动播放、逐根推进、快进；逐分钟撮合，图表只显示已揭示行情。
+- 合约/来源切换时按旧行情末价平仓；保证金不足时模拟强平。
+- 保证金、手续费和滑点是可调整的固定训练参数，不等同于历史逐日官方费率。
+- 行情来自历史 CSV、公开数据源及已有清洗数据；部分历史分钟含明确标记的零成交延续补柱。
+- 页面会话刷新、休眠或重启可能清空练习；请及时导出成交和资金记录。
 
 ## Streamlit Community Cloud
 
-将本目录推送到 GitHub 后，在 Streamlit Community Cloud 新建应用：
+Repository: `wusuaya/auto-oil`
+Branch: `main`
+Main file path: `streamlit_app.py`
+Python: `3.12`，无需 Secrets。
 
-- Repository：选择本仓库；
-- Branch：`main`；
-- Main file path：`streamlit_app.py`。
+更新仓库后，已连接此分支的应用由 Streamlit Cloud 自动更新。
 
-部署完成后会获得可在手机浏览器打开的 HTTPS 链接。
+## 本地运行
 
-## 固定交易规则
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
 
-- SC 合约乘数：1,000 桶/手；
-- 最小变动价位：0.1 元/桶；
-- 一般持仓保证金：16%；
-- 手续费按交易日与合约自动应用 INE 公告规则；
-- 市价模拟撮合固定计入 1 跳滑点，限价成交不额外加入滑点；
-- 页面不连接真实交易账户，不会发送真实委托。
-
-官方依据：
-
-- https://www.ine.cn/publicnotice/notice/202606/t20260623_832254.html
-- https://www.ine.cn/eng/circularnews/circular/202606/t20260623_832232.html
+本次随仓库发布的 2025—2026 行情快照最新到 2026-09-28 11:30（北京时间）。
+云端不访问电脑本地文件，后续行情更新需要再次同步并推送数据。
