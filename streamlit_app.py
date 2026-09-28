@@ -4,32 +4,34 @@ from datetime import datetime, time
 from pathlib import Path
 import sys
 import time as clock
+from uuid import uuid4
 
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
+from auto_oil.chart_ui import trading_chart  # noqa: E402
 from auto_oil.paper_trading import ContractSpec, PaperAccount  # noqa: E402
 from auto_oil.replay import ReplaySession, chart_bars, prepare_bars, random_window  # noqa: E402
 
 DATA_DIR = ROOT / "data/processed/sc_main/bars_1m"
-st.set_page_config(page_title="原油模拟交易", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="原油模拟交易", page_icon="📈", layout="wide", initial_sidebar_state="collapsed"
+)
 st.markdown(
     """<style>
-.stApp {background:#f5f7fa;color:#192438}
-[data-testid="stHeader"] {background:#f5f7fa}
-[data-testid="stSidebar"] {background:#fff;border-right:1px solid #e5e8ef}
-.block-container {padding-top:1.1rem;padding-bottom:1rem;padding-left:1.5rem;padding-right:1.5rem;max-width:1800px}
-[data-testid="stMetric"] {background:white;border:1px solid #e5e8ef;padding:12px 16px;border-radius:6px}
+.stApp {background:#111318;color:#d6d8df}
+[data-testid="stHeader"] {background:#111318}
+[data-testid="stSidebar"] {background:#171a20;border-right:1px solid #333740}
+.block-container {padding-top:1.1rem;padding-bottom:1rem;padding-left:1.5rem;padding-right:1.5rem;max-width:2400px}
+[data-testid="stMetric"] {background:#181c23;border:1px solid #333740;padding:7px 12px;border-radius:2px}
 [data-testid="stMetricValue"] {font-size:20px}
 [data-testid="stToolbar"] {display:none}
-h1 {font-size:26px!important} h3 {font-size:18px!important}
-.quote {background:white;border:1px solid #e5e8ef;border-radius:6px;padding:12px 18px;margin:8px 0 14px}
-.symbol {font-size:16px;font-weight:600}.price {font-size:30px;font-weight:700;margin:0 16px}
-.muted {color:#778397;font-size:13px}.badge {font-size:12px;background:#edf3ff;color:#3869bc;padding:4px 8px;border-radius:4px}
+h1 {font-size:22px!important;padding:0!important} h3 {font-size:18px!important}
+.quote {background:#181c23;border:1px solid #333740;border-radius:6px;padding:7px 12px;margin:0 0 6px}
+.symbol {font-size:16px;font-weight:600}.price {font-size:25px;font-weight:700;margin:0 16px}
+.muted {color:#778397;font-size:13px}.badge {font-size:12px;background:#282a22;color:#dec05d;padding:4px 8px;border-radius:4px}
 div.stButton>button {border-radius:5px;white-space:nowrap}
 .st-key-buy button {background:#db3b47!important;color:white!important;border-color:#db3b47!important}
 .st-key-sell button {background:#168766!important;color:white!important;border-color:#168766!important}
@@ -42,81 +44,6 @@ div.stButton>button {border-radius:5px;white-space:nowrap}
 def load_data(signature: tuple) -> pd.DataFrame:
     frames = [pd.read_parquet(path) for path, _, _ in signature]
     return prepare_bars(pd.concat(frames, ignore_index=True)) if frames else pd.DataFrame()
-
-
-def draw_chart(frame: pd.DataFrame, fills: list) -> go.Figure:
-    labels = frame.dt.dt.strftime("%m-%d %H:%M").tolist()
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True, row_heights=[0.8, 0.2], vertical_spacing=0.025
-    )
-    fig.add_trace(
-        go.Candlestick(
-            x=labels,
-            open=frame.open,
-            high=frame.high,
-            low=frame.low,
-            close=frame.close,
-            increasing_line_color="#dc4350",
-            decreasing_line_color="#168766",
-            name="原油",
-        ),
-        row=1,
-        col=1,
-    )
-    for window, color in [(5, "#d49a26"), (20, "#5779d2")]:
-        fig.add_trace(
-            go.Scatter(
-                x=labels,
-                y=frame.close.rolling(window).mean(),
-                line=dict(color=color, width=1),
-                name=f"MA{window}",
-            ),
-            row=1,
-            col=1,
-        )
-    colors = ["#dc4350" if c >= o else "#168766" for o, c in zip(frame.open, frame.close)]
-    fig.add_trace(
-        go.Bar(x=labels, y=frame.volume, marker_color=colors, name="成交量", showlegend=False),
-        row=2,
-        col=1,
-    )
-    for side, symbol, color, title in [
-        ("buy", "triangle-up", "#dc4350", "买入"),
-        ("sell", "triangle-down", "#168766", "卖出"),
-    ]:
-        selected = [f for f in fills if f.side == side and f.timestamp >= frame.dt.iloc[0]]
-        xs = [
-            labels[max(0, int(frame.dt.searchsorted(pd.Timestamp(f.timestamp), side="right")) - 1)]
-            for f in selected
-        ]
-        if selected:
-            fig.add_trace(
-                go.Scatter(
-                    x=xs,
-                    y=[f.price for f in selected],
-                    mode="markers",
-                    marker=dict(
-                        symbol=symbol, size=12, color=color, line=dict(color="white", width=1)
-                    ),
-                    name=title,
-                ),
-                row=1,
-                col=1,
-            )
-    fig.update_layout(
-        height=465,
-        margin=dict(l=5, r=10, t=25, b=5),
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        font_color="#637085",
-        xaxis_rangeslider_visible=False,
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.09, x=0),
-        dragmode="pan",
-    )
-    fig.update_xaxes(type="category", showgrid=False, nticks=8)
-    fig.update_yaxes(gridcolor="#edf0f5", side="right", fixedrange=False)
-    return fig
 
 
 signature = tuple(
@@ -203,7 +130,8 @@ if new_session or "replay" not in st.session_state:
         st.session_state.replay = ReplaySession(
             selected, PaperAccount(initial_cash=initial_cash, cash=initial_cash), spec
         )
-        st.session_state.context = data.loc[data.dt < selected.dt.iloc[0]].tail(1000).copy()
+        st.session_state.context = data.loc[data.dt < selected.dt.iloc[0]].tail(30000).copy()
+        st.session_state.chart_session_id = uuid4().hex
         st.session_state.playing = False
         st.session_state.last_tick = clock.monotonic()
         st.session_state.pop("limit_input", None)
@@ -213,12 +141,13 @@ if new_session or "replay" not in st.session_state:
         if "replay" not in st.session_state:
             st.stop()
 
+st.session_state.setdefault("chart_session_id", uuid4().hex)
 session: ReplaySession = st.session_state.replay
 account, spec = session.account, session.spec
 title, status = st.columns([5, 2])
 title.markdown("# 原油模拟交易")
 status.markdown(
-    '<div style="text-align:right;padding-top:14px"><span class="badge">历史回放 · 模拟账户</span></div>',
+    '<div style="text-align:right;padding-top:14px"><span class="badge">行情终端 v2 · 模拟账户</span></div>',
     unsafe_allow_html=True,
 )
 st.caption(
@@ -267,20 +196,7 @@ st.markdown(
     f"　成交量 {int(bar.volume):,}</span></div>",
     unsafe_allow_html=True,
 )
-metrics = st.columns(5)
 equity = account.equity(price, spec)
-for col, label, value in zip(
-    metrics,
-    ["总权益", "可用资金", "持仓盈亏", "本次净盈亏", "占用保证金"],
-    [
-        equity,
-        account.available(price, spec),
-        account.unrealized_pnl(price, spec),
-        equity - account.initial_cash,
-        account.margin(price, spec),
-    ],
-):
-    col.metric(label, f"{value:,.2f}")
 
 if "notice" in st.session_state:
     st.toast(st.session_state.pop("notice"))
@@ -290,20 +206,21 @@ if session.finished:
         f"本段回放结束 · 收益率 {(equity / account.initial_cash - 1):+.2%} · 手续费 {account.total_fees:,.2f} 元。剩余持仓按最后价格计浮盈，可手动平仓后导出记录。"
     )
 
-left, right = st.columns([3.6, 1.15], gap="medium")
+left, right = st.columns([4.8, 1.1], gap="small")
 with left:
     visible = pd.concat(
         [st.session_state.context, session.bars.iloc[: session.cursor + 1]], ignore_index=True
-    ).tail(1500)
-    frame = chart_bars(visible, step).tail(180)
-    st.plotly_chart(
-        draw_chart(frame, account.fills),
-        width="stretch",
-        config={"displaylogo": False, "scrollZoom": True},
+    ).tail(30000)
+    frame = chart_bars(visible, step).tail(6000)
+    trading_chart(
+        frame,
+        account.fills,
+        account.positions,
+        session.orders,
+        st.session_state.chart_session_id,
+        step,
     )
-    st.caption(
-        "5 分钟 K 线随已回放的 1 分钟数据逐步形成；切换周期不改变回放时间。每一步按交易分钟推进，自动跳过无行情时段。"
-    )
+
 with right:
     st.subheader("买卖委托")
     st.caption(f"{bar.contract}　｜　最新价 {price:.1f}")
@@ -346,6 +263,21 @@ with right:
     net = account.net_position()
     st.caption(f"当前持仓：{'多' if net > 0 else '空' if net < 0 else '无'} {abs(net)} 手")
     st.caption(f"手续费累计 {account.total_fees:,.2f} 元　｜　滑点 {spec.slippage_ticks:g} 跳")
+
+metrics = st.columns(5)
+for col, label, value in zip(
+    metrics,
+    ["总权益", "可用资金", "持仓盈亏", "本次净盈亏", "占用保证金"],
+    [
+        equity,
+        account.available(price, spec),
+        account.unrealized_pnl(price, spec),
+        equity - account.initial_cash,
+        account.margin(price, spec),
+    ],
+):
+    col.metric(label, f"{value:,.2f}")
+
 
 tabs = st.tabs(["持仓", "委托 / 撤单", "成交记录", "资金曲线", "交易说明"])
 with tabs[0]:
@@ -429,6 +361,7 @@ with tabs[4]:
     - 合约乘数 {spec.multiplier} 桶/手，最小跳动 {spec.tick_size} 元。保证金 {spec.margin_rate:.0%}；开仓 / 平昨 / 平今费用为 {spec.open_fee:g} / {spec.close_fee:g} / {spec.close_today_fee:g} 元/手，均为固定练习参数。
     - 主连合约或来源代码变化时，旧持仓按最后可见旧价格平仓并撤单。SC0/SC_MAIN 是连续行情标识，不能等同于可成交合约。
     - 可用资金不足时模拟强平；仅检查每分钟结束时的风险，不模拟盘中逐笔强平或涨跌停无法成交。
+    - 图表：滚轮 / ↑↓ 缩放，拖动查看历史，←→ 移动十字光标，End 返回最新，双击复位。主图 MA / BOLL / EXPMA，副图 MACD / KDJ / RSI / W&R / CCI / 成交量；参数在图内设置。指标按已载入最多 6,000 根 K 线计算，EMA/SMA 类指标受起算点影响，与同花顺历史起算点不同时可能略有差异。
     - 回放只向前推进，避免带仓倒退。设置只在开始新练习时生效；刷新或关闭页面可能丢失本次练习，请及时导出。
     """)
     if session.events:
