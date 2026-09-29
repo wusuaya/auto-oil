@@ -2,11 +2,12 @@
 (() => {
   'use strict';
   const $=id=>document.getElementById(id), canvas=$('chart'), ctx=canvas.getContext('2d');
-  const RED='#ff484e', GREEN='#00bb88', COLORS=['#e8e8ea','#ffda45','#ef77e8','#56cde8'];
+  const RED='#e7474e', GREEN='#159b75', COLORS=['#7c8291','#cd9d28','#d661b7','#428edf'];
   const clone=x=>JSON.parse(JSON.stringify(x));
   let prefs={main:'MA',sub:'MACD',vol:true,levels:true,hollow:true,params:clone(OilIndicators.defaults)};
   try{prefs={...prefs,...JSON.parse(localStorage.getItem('oil-chart-prefs-v1')||'{}')};}catch{}
-  let rows=[], indicators={}, markers=[], levels=[], n=0, count=120, right=0, follow=true;
+  let rows=[], indicators={}, markers=[], levels=[], n=0, count=55, right=0, follow=true;
+  let touchTimer=null, inspecting=false;
   let key='',period='',hover=null,W=0,H=0,panes=[],drag=null,pointers=new Map(),pinch=null;
   const fmt=(v,d=2)=>Number.isFinite(v)?v.toFixed(d):'—';
   const short=v=>Math.abs(v)>=10000?(v/10000).toFixed(1)+'万':fmt(v,0);
@@ -22,11 +23,11 @@
   const text=(s,x,y,c='#999fae',align='left')=>{ctx.fillStyle=c;ctx.textAlign=align;ctx.fillText(s,x,y);};
   function draw(){
     if(!n||!W)return;
-    constrain(); ctx.clearRect(0,0,W,H);ctx.fillStyle='#101114';ctx.fillRect(0,0,W,H);ctx.font='11px Arial,"Microsoft YaHei"';ctx.lineWidth=1;
+    constrain(); ctx.clearRect(0,0,W,H);ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);ctx.font='11px Arial,"Microsoft YaHei"';ctx.lineWidth=1;
     const width=Math.max(60,W-72), start=Math.max(0,right-count), end=Math.min(n,Math.ceil(right)), first=Math.floor(start),dx=width/count;
     const X=i=>8+(i-start+.5)*dx, current=hover?Math.max(first,Math.min(end-1,Math.floor(start+(hover.x-8)/dx))):end-1;
     const r=rows[current]; if(!r)return;
-    const showVol=prefs.vol && prefs.sub!=='VOL', subH=prefs.sub==='VOL'?100:115, volH=showVol?85:0, mainH=H-subH-volH-25;
+    const showVol=prefs.vol && prefs.sub!=='VOL', subH=Math.max(56,H*.19), volH=showVol?Math.max(44,H*.15):0, mainH=H-subH-volH-25;
     panes=[{top:0,bottom:mainH,kind:'price',keys:mainKeys()},...(showVol?[{top:mainH,bottom:mainH+volH,kind:'vol',keys:['VMA5','VMA10']}]:[]),{top:mainH+volH,bottom:H-25,kind:prefs.sub==='VOL'?'vol':'sub',keys:subKeys()}];
     for(const p of panes){
       let vals=[];
@@ -39,11 +40,11 @@
       const pad=(hi-lo||Math.max(1,Math.abs(hi)*.01))*.08;
       if(p.kind!=='vol')lo-=pad;hi+=pad;
       p.y0=p.top+24;p.y1=p.bottom-9;p.lo=lo;p.hi=hi;p.Y=v=>p.y1-(v-lo)/(hi-lo||1)*(p.y1-p.y0);
-      ctx.strokeStyle='#30333c';ctx.beginPath();ctx.moveTo(0,p.bottom);ctx.lineTo(W,p.bottom);ctx.stroke();
-      for(let j=0;j<=4;j++){let y=p.y0+(p.y1-p.y0)*j/4;ctx.strokeStyle='#252831';ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width+8,y);ctx.stroke();text(p.kind==='vol'?short(hi-(hi-lo)*j/4):fmt(hi-(hi-lo)*j/4,p.kind==='price'?1:2),W-4,y+4,'#9298a5','right');}
+      ctx.strokeStyle='#e7e9ee';ctx.beginPath();ctx.moveTo(0,p.bottom);ctx.lineTo(W,p.bottom);ctx.stroke();
+      const ticks=p.y1-p.y0<70?1:4;for(let j=0;j<=ticks;j++){let y=p.y0+(p.y1-p.y0)*j/ticks;ctx.strokeStyle='#f0f1f4';ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width+8,y);ctx.stroke();text(p.kind==='vol'?short(hi-(hi-lo)*j/ticks):fmt(hi-(hi-lo)*j/ticks,p.kind==='price'?1:2),W-4,y+4,'#9298a5','right');}
       ctx.save();ctx.beginPath();ctx.rect(0,p.y0,width+9,p.y1-p.y0+1);ctx.clip();
       if(p.kind==='price'){
-        for(let i=first;i<end;i++){const b=rows[i],x=X(i),up=b.c>=b.o,col=up?RED:GREEN;ctx.strokeStyle=col;ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(x,p.Y(b.h));ctx.lineTo(x,p.Y(b.l));ctx.stroke();const y=Math.min(p.Y(b.o),p.Y(b.c)),bh=Math.max(1,Math.abs(p.Y(b.o)-p.Y(b.c))),bw=Math.max(1,dx*.68);if(up&&prefs.hollow){ctx.fillStyle='#101114';ctx.fillRect(x-bw/2,y,bw,bh);ctx.strokeRect(x-bw/2,y,bw,bh);}else ctx.fillRect(x-bw/2,y,bw,bh);}
+        for(let i=first;i<end;i++){const b=rows[i],x=X(i),up=b.c>=b.o,col=up?RED:GREEN;ctx.strokeStyle=col;ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(x,p.Y(b.h));ctx.lineTo(x,p.Y(b.l));ctx.stroke();const y=Math.min(p.Y(b.o),p.Y(b.c)),bh=Math.max(1,Math.abs(p.Y(b.o)-p.Y(b.c))),bw=Math.max(1,dx*.68);if(up&&prefs.hollow){ctx.fillStyle='#ffffff';ctx.fillRect(x-bw/2,y,bw,bh);ctx.strokeRect(x-bw/2,y,bw,bh);}else ctx.fillRect(x-bw/2,y,bw,bh);}
       }
       if(p.kind==='vol'||(p.kind==='sub'&&prefs.sub==='MACD')){
         for(let i=first;i<end;i++){const value=p.kind==='vol'?rows[i].v:indicators.MACD[i],up=p.kind==='vol'?rows[i].c>=rows[i].o:value>=0;ctx.fillStyle=up?RED:GREEN;const y=p.Y(value),zero=p.Y(0);ctx.fillRect(X(i)-Math.max(1,dx*.65)/2,Math.min(y,zero),Math.max(1,dx*.65),Math.max(1,Math.abs(y-zero)));}
@@ -55,13 +56,14 @@
       }
       ctx.restore();
       const name=p.kind==='price'?(prefs.main==='NONE'?'K线':prefs.main):p.kind==='vol'?'VOL':prefs.sub;
-      text(name,8,p.top+15,'#cbd0da');let tx=8+ctx.measureText(name).width+14;
+      text(name,8,p.top+15,'#747b88');let tx=8+ctx.measureText(name).width+14;
       const infoKeys=p.kind==='sub'&&prefs.sub==='MACD'?[...p.keys,'MACD']:p.kind==='vol'?['VOL',...p.keys]:p.keys;
       infoKeys.forEach((k,i)=>{const s=k+':'+fmt(indicators[k][current],k==='VOL'?0:2);if(tx+ctx.measureText(s).width<width){text(s,tx,p.top+15,COLORS[i%COLORS.length]);tx+=ctx.measureText(s).width+14;}});
     }
-    for(let j=0;j<=5;j++){const i=Math.max(first,Math.min(end-1,Math.round(start+count*j/5)));const x=Math.max(40,Math.min(width-40,X(i)));text(rows[i].t.slice(5),x,H-8,'#8f96a5','center');}
+    for(let j=0;j<=2;j++){const i=Math.max(first,Math.min(end-1,Math.round(start+count*j/2)));const x=Math.max(40,Math.min(width-40,X(i)));text(rows[i].t.slice(5),x,H-8,'#8f96a5','center');}
     if(hover){const p=panes.find(p=>hover.y>=p.top&&hover.y<=p.bottom);ctx.setLineDash([3,3]);ctx.strokeStyle='#9298a6';ctx.beginPath();ctx.moveTo(X(current),0);ctx.lineTo(X(current),H-25);if(p){ctx.moveTo(0,hover.y);ctx.lineTo(width,hover.y);}ctx.stroke();ctx.setLineDash([]);if(p){const val=p.lo+(p.y1-hover.y)/(p.y1-p.y0)*(p.hi-p.lo);ctx.fillStyle='#424854';ctx.fillRect(width+8,hover.y-9,64,18);text(fmt(val,p.kind==='vol'?0:2),W-3,hover.y+4,'white','right');}ctx.fillStyle='#424854';const timeX=Math.max(60,Math.min(width-60,X(current)));ctx.fillRect(timeX-59,H-24,118,23);text(r.t.slice(5),timeX,H-8,'white','center');}
-    $('quote').textContent=`${r.t}　开 ${fmt(r.o,1)}　高 ${fmt(r.h,1)}　低 ${fmt(r.l,1)}　收 ${fmt(r.c,1)}　量 ${short(r.v)}　${period}分钟`;
+    for(const [id,value] of [['qo',r.o],['qh',r.h],['qc',r.c],['ql',r.l]]){document.getElementById(id).textContent=fmt(value,1);document.getElementById(id).className=value>=r.o?'up':'down';}
+    $('quote').textContent=`${r.t}　成交量 ${short(r.v)}　${period}分钟`;
     $('quote').style.color=r.c>=r.o?RED:GREEN;
     $('view').textContent=`${Math.min(count,n)} 根 / ${follow?'跟随最新':'查看历史'}`;
     $('history').textContent=`已载入 ${n.toLocaleString()} 根 · 仅已揭示行情`;
@@ -71,7 +73,7 @@
   function zoom(factor,anchor=.5){const old=count,next=Math.max(15,Math.min(Math.max(n,15),Math.round(old*factor)));const point=right-old+anchor*old;count=next;right=follow?n:point+(1-anchor)*next;changed();}
   function pan(amount){right+=amount;follow=right>=n;hover=null;changed();}
   function latest(){follow=true;right=n;hover=null;changed();}
-  function reset(){count=120;latest();}
+  function reset(){count=55;latest();}
   $('zin').onclick=()=>zoom(.8);$('zout').onclick=()=>zoom(1.25);$('older').onclick=()=>pan(-Math.max(5,count/4));$('newer').onclick=()=>pan(Math.max(5,count/4));$('latest').onclick=latest;$('reset').onclick=reset;
   document.querySelectorAll('[data-main]').forEach(b=>b.onclick=()=>{prefs.main=b.dataset.main;savePrefs();syncButtons();draw();});
   document.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>{prefs.sub=b.dataset.sub;savePrefs();syncButtons();draw();});
@@ -82,9 +84,9 @@
   $('form').onsubmit=e=>{e.preventDefault();const p={};for(const k of Object.keys(OilIndicators.defaults)){p[k]=$('form').elements[k].value.split(/[,，\s]+/).filter(Boolean).map(Number);const size=OilIndicators.defaults[k].length;if(p[k].length!==size||p[k].some((v,i)=>!Number.isFinite(v)||v<1||v>250||(!(k==='boll'&&i===1)&&!Number.isInteger(v)))){$('error').textContent=k.toUpperCase()+' 参数无效，请按默认个数填写 1–250 的周期。';return;}}if(p.macd[0]>=p.macd[1]){$('error').textContent='MACD 短周期必须小于长周期。';return;}prefs.params=p;indicators=OilIndicators.calculate(rows,p);savePrefs();$('dialog').close();draw();};
   function point(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
   canvas.addEventListener('wheel',e=>{e.preventDefault();zoom(e.deltaY<0?.85:1/.85,Math.max(0,Math.min(1,point(e).x/(W-72))));},{passive:false});
-  canvas.addEventListener('pointerdown',e=>{if(e.button&&e.button!==0)return;canvas.focus();canvas.setPointerCapture(e.pointerId);const pos=point(e);pointers.set(e.pointerId,pos);drag={x:pos.x,right};if(pointers.size===2){const pts=[...pointers.values()];pinch={distance:Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y),count};}hover=pos;draw();});
-  canvas.addEventListener('pointermove',e=>{const pos=point(e);if(pointers.has(e.pointerId))pointers.set(e.pointerId,pos);if(pointers.size===2&&pinch){const pts=[...pointers.values()],dist=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);zoom(pinch.count*Math.max(1,pinch.distance)/Math.max(1,dist)/count);return;}if(drag&&pointers.size===1&&Math.abs(pos.x-drag.x)>3){right=drag.right-(pos.x-drag.x)/(Math.max(60,W-72)/count);follow=right>=n;hover=null;changed();}else{hover=pos;draw();}});
-  function release(e){pointers.delete(e.pointerId);drag=null;pinch=null;saveView();}
+  canvas.addEventListener('pointerdown',e=>{if(e.button&&e.button!==0)return;canvas.focus();canvas.setPointerCapture(e.pointerId);const pos=point(e);pointers.set(e.pointerId,pos);drag={x:pos.x,right};if(pointers.size===2){const pts=[...pointers.values()];pinch={distance:Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y),count};}hover=e.pointerType==='touch'?null:pos;inspecting=false;clearTimeout(touchTimer);if(e.pointerType==='touch'&&pointers.size===1)touchTimer=setTimeout(()=>{inspecting=true;hover=pos;draw();},450);draw();});
+  canvas.addEventListener('pointermove',e=>{const pos=point(e);if(pointers.has(e.pointerId))pointers.set(e.pointerId,pos);if(pointers.size===2&&pinch){clearTimeout(touchTimer);inspecting=false;const pts=[...pointers.values()],dist=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);zoom(pinch.count*Math.max(1,pinch.distance)/Math.max(1,dist)/count);return;}if(inspecting){hover=pos;draw();return;}if(drag&&pointers.size===1&&Math.abs(pos.x-drag.x)>5){clearTimeout(touchTimer);right=drag.right-(pos.x-drag.x)/(Math.max(60,W-72)/count);follow=right>=n;hover=null;changed();}else{hover=pos;draw();}});
+  function release(e){clearTimeout(touchTimer);inspecting=false;pointers.delete(e.pointerId);drag=null;pinch=null;saveView();}
   canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('pointerleave',()=>{if(!drag){hover=null;draw();}});canvas.ondblclick=reset;
   canvas.onkeydown=e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','+','-','=','End','Home','Escape'].includes(e.key))e.preventDefault();if(e.key==='ArrowUp'||e.key==='+'||e.key==='=')zoom(.8);if(e.key==='ArrowDown'||e.key==='-')zoom(1.25);if(e.key==='End')latest();if(e.key==='Home'){right=Math.min(n,count);follow=false;changed();}if(e.key==='Escape'){hover=null;draw();}if(e.key==='ArrowLeft'||e.key==='ArrowRight'){const direction=e.key==='ArrowLeft'?-1:1;if(e.ctrlKey){pan(direction*count/4);return;}const dx=Math.max(60,W-72)/count;hover={x:hover?hover.x+direction*dx:Math.max(8,(W-72)-dx),y:hover?.y??100};if(hover.x<8){pan(-1);hover={x:8,y:100};}if(hover.x>W-72){pan(1);hover={x:W-72,y:100};}draw();}};
   canvas.oncontextmenu=e=>{e.preventDefault();$('context').style.display='block';$('context').style.left=Math.min(e.clientX,W-150)+'px';$('context').style.top=Math.min(e.clientY,H-80)+'px';};
@@ -93,7 +95,7 @@
     if(event.source!==parent||event.data?.type!=='streamlit:render')return;
     const args=event.data.args, nextKey='oil-view-'+args.session_id+'-'+args.period, oldTime=rows[Math.max(0,Math.ceil(right)-1)]?.t;
     rows=args.rows||[];n=rows.length;markers=args.markers||[];levels=args.levels||[];period=args.period;
-    if(key!==nextKey){key=nextKey;let saved=null;try{saved=JSON.parse(sessionStorage.getItem(key)||'null');}catch{}count=saved?.count||120;follow=saved?.follow??true;right=follow?n:saved?.time?locate(saved.time)+1:n;hover=null;}
+    if(key!==nextKey){key=nextKey;let saved=null;try{saved=JSON.parse(sessionStorage.getItem(key)||'null');}catch{}count=saved?.count||55;follow=saved?.follow??true;right=follow?n:saved?.time?locate(saved.time)+1:n;hover=null;}
     else right=follow?n:oldTime?locate(oldTime)+1:right;
     indicators=OilIndicators.calculate(rows,prefs.params);syncButtons();constrain();resize();saveView();
   });

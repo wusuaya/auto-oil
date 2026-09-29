@@ -10,7 +10,7 @@ _component = components.declare_component(
 )
 
 
-def trading_chart(frame, fills, positions, orders, session_id, period):
+def trading_chart(frame, fills, positions, orders, session_id, period, state=None):
     rows = frame[["dt", "open", "high", "low", "close", "volume"]].copy()
     rows["dt"] = rows["dt"].dt.strftime("%Y-%m-%d %H:%M")
     # No hidden future rows are sent to the browser.
@@ -43,7 +43,8 @@ def trading_chart(frame, fills, positions, orders, session_id, period):
         for o in orders
         if o["状态"] == "待成交"
     ]
-    _component(
+    return _component(
+        state=state or {},
         rows=records,
         markers=markers,
         levels=levels,
