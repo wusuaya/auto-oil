@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit.components.v1 as components
 
 _component = components.declare_component(
-    "oil_terminal_chart", path=str(Path(__file__).with_name("chart_frontend"))
+    "oil_mobile_v5", path=str(Path(__file__).with_name("chart_frontend"))
 )
 
 

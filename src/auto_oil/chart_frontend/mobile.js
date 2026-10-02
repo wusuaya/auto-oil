@@ -1,8 +1,22 @@
 /* One event in flight; Python acknowledges before controls unlock. */
 (()=>{
 'use strict';const $=id=>document.getElementById(id);let state={},session='',qty=1,limit=false,pending=null,lastNotice='';
-function fit(){let h=window.innerHeight;try{h=parent.innerHeight;}catch{}document.documentElement.style.setProperty('--screen',Math.max(570,h-4)+'px');parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:Math.max(570,h-4)},'*');}
-window.addEventListener('resize',fit);fit();
+// Do not size from this iframe's own height: that creates a resize loop.
+// Clamp oversized embedding frames to the physical screen and use visualViewport
+// so mobile browser controls and the keyboard cannot cover the trading footer.
+let lastHeight=0;
+function fit(){
+ const screenHeight=window.screen?.height||740;
+ let h=Math.min(screenHeight-240,560);
+ try {h=Math.min(parent.visualViewport?.height||parent.innerHeight,screenHeight);}catch{}
+ h=Math.max(460,Math.round(h-12));
+ if(h===lastHeight)return;lastHeight=h;
+ document.documentElement.style.setProperty('--screen',h+'px');
+ parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:h},'*');
+}
+window.addEventListener('resize',fit);
+try{parent.visualViewport?.addEventListener('resize',fit);parent.addEventListener('resize',fit);}catch{}
+fit();
 function notice(message){$('notice').textContent=message;clearTimeout(lastNotice);lastNotice=setTimeout(()=>$('notice').textContent='',3000);}
 function refresh(){
  document.querySelectorAll('[data-qty]').forEach(b=>b.classList.toggle('active',+b.dataset.qty===qty));
@@ -21,7 +35,7 @@ $('speed').onchange=e=>send('speed',{value:+e.target.value});
 $('more').onclick=()=>$('options').showModal();$('order').onclick=()=>$('orderSheet').showModal();
 $('marketMode').onclick=()=>{limit=false;refresh();};$('limitMode').onclick=()=>{limit=true;refresh();};$('limitValue').oninput=refresh;
 window.addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='streamlit:render')return;const args=event.data.args;state=args.state||{};if(session!==args.session_id){session=args.session_id;pending=null;limit=false;$('limitValue').value=args.rows.at(-1)?.c||'';}if(state.ack===pending)pending=null;
-$('returns').textContent=(state.returns||0).toFixed(2)+'%';$('returns').className=state.returns>=0?'up':'down';
+$('netpnl').textContent=(state.net_pnl>0?'+':'')+(state.net_pnl||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});$('netpnl').className=state.net_pnl>=0?'up':'down';$('returns').textContent='收益率 '+(state.returns||0).toFixed(2)+'%';$('returns').className=state.returns>=0?'up':'down';
 $('holdings').textContent=`多 ${state.long||0}手 · 空 ${state.short||0}手`;$('pnl').textContent=`浮盈 ${(state.pnl||0).toFixed(0)}`;$('pnl').className=state.pnl>=0?'up':'down';$('play').textContent=state.playing?'Ⅱ 暂停':'▶ 播放';$('speed').value=state.speed||1;
-$('time').textContent=state.time||'';$('time').title=state.range||'';$('status').textContent=state.finished?'本局结束 · 可平仓结算':pending?'处理中…':'双指缩放 · 长按看价';$('progress').style.width=(state.progress*100)+'%';document.querySelectorAll('[data-period]').forEach(b=>b.classList.toggle('active',+b.dataset.period===args.period));if(state.notice)notice(state.notice);refresh();fit();});
+$('time').textContent=state.time||'';$('time').title=state.range||'';$('status').textContent=state.finished?'本局结束 · 可平仓结算':pending?'处理中…':(state.complete?'已收线 · 长按看价':'形成中 · 下一根补完');$('progress').style.width=(state.progress*100)+'%';document.querySelectorAll('[data-period]').forEach(b=>b.classList.toggle('active',+b.dataset.period===args.period));if(state.notice)notice(state.notice);refresh();fit();});
 })();

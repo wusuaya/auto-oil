@@ -29,27 +29,37 @@ def random_window(data: pd.DataFrame, days: int, rng: random.Random | None = Non
     return subset.dt.iloc[0], subset.dt.iloc[-1]
 
 
+PERIODS = (1, 5, 15, 30, 60, 1440)
+
+
+def candle_groups(source: pd.DataFrame, minutes: int) -> pd.Series:
+    """Stable boundaries shared by the chart and replay clock.
+
+    Intraday buckets use Beijing clock time, split at session gaps.
+    Daily bars use the supplied exchange trading day, including night trading.
+    Never merge different continuous-contract sources into one candle.
+    """
+    if minutes not in PERIODS:
+        raise ValueError("不支持的 K 线周期")
+    bucket = (source.trading_day.dt.normalize() if minutes == 1440
+              else source.dt.dt.floor(f"{minutes}min"))
+    boundary = bucket.ne(bucket.shift()) | source.contract.ne(source.contract.shift())
+    if minutes != 1440:
+        boundary |= source.dt.diff().gt(pd.Timedelta(minutes=1))
+        boundary |= source.trading_day.ne(source.trading_day.shift())
+    return boundary.cumsum()
+
+
 def chart_bars(visible: pd.DataFrame, minutes: int) -> pd.DataFrame:
-    """Aggregate only already revealed minutes; separate contracts and sessions."""
-    if minutes == 1 or visible.empty:
+    """Aggregate revealed minutes only; never use future OHLC values."""
+    if visible.empty:
         return visible.copy()
-    source = visible.copy()
-    source["bucket"] = source.dt.dt.floor(f"{minutes}min")
-    source["segment"] = (
-        source.contract.ne(source.contract.shift()) | source.dt.diff().gt(pd.Timedelta(minutes=1))
-    ).cumsum()
     return (
-        source.groupby(["segment", "bucket"], sort=False)
-        .agg(
-            dt=("dt", "first"),
-            open=("open", "first"),
-            high=("high", "max"),
-            low=("low", "min"),
-            close=("close", "last"),
-            volume=("volume", "sum"),
-            contract=("contract", "last"),
-            open_interest=("open_interest", "last"),
-        )
+        visible.groupby(candle_groups(visible, minutes), sort=False)
+        .agg(dt=("dt", "first"), open=("open", "first"),
+             high=("high", "max"), low=("low", "min"), close=("close", "last"),
+             volume=("volume", "sum"), contract=("contract", "last"),
+             open_interest=("open_interest", "last"))
         .reset_index(drop=True)
     )
 
@@ -179,6 +189,27 @@ class ReplaySession:
             if quantity:
                 self.execute(side, quantity, float(bar.close), bar, self.spec, note, offset="close")
         self.record_equity()
+
+    def advance_candles(self, minutes: int, count: int = 1):
+        """Finish the current partial candle, or reveal the next whole candle.
+
+        Only timestamps/contract IDs determine the endpoint. advance() still
+        matches orders and checks margin for every intervening minute.
+        """
+        groups = candle_groups(self.bars, minutes)
+        ends = self.bars.index[groups.ne(groups.shift(-1))].to_numpy()
+        for _ in range(count):
+            if self.finished:
+                break
+            target = ends[ends > self.cursor][0]
+            self.advance(int(target) - self.cursor)
+
+    def candle_complete(self, minutes: int) -> bool:
+        if self.finished:
+            return True
+        pair = self.bars.iloc[self.cursor:self.cursor + 2]
+        groups = candle_groups(pair, minutes)
+        return bool(groups.iloc[0] != groups.iloc[1])
 
     def advance(self, steps: int = 1):
         for _ in range(min(steps, len(self.bars) - self.cursor - 1)):

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 from auto_oil.chart_ui import trading_chart  # noqa: E402
 from auto_oil.paper_trading import ContractSpec, PaperAccount  # noqa: E402
-from auto_oil.replay import ReplaySession, chart_bars, prepare_bars, random_window  # noqa: E402
+from auto_oil.replay import PERIODS, ReplaySession, chart_bars, prepare_bars, random_window  # noqa: E402
 
 DATA_DIR = ROOT / "data/processed/sc_main/bars_1m"
 st.set_page_config(
@@ -68,7 +68,7 @@ def reset_training(start_at=None, end_at=None):
         raise ValueError("该时段不足两根分钟行情，请调整时间。")
     spec = ContractSpec(margin_rate=c['margin']/100, open_fee=c['open'], close_fee=c['close'], close_today_fee=c['today'], slippage_ticks=c['slip'])
     st.session_state.replay = ReplaySession(selected, PaperAccount(initial_cash=c['cash'], cash=c['cash']), spec)
-    st.session_state.context = data.loc[data.dt < selected.dt.iloc[0]].tail(30000).copy()
+    st.session_state.context = data.loc[data.dt < selected.dt.iloc[0]].copy()
     st.session_state.chart_session_id = uuid4().hex
     st.session_state.playing = False
     st.session_state.notice = "新练习已开始"
@@ -222,6 +222,7 @@ def records_panel():
         - 主连合约或来源代码变化时，旧持仓按最后可见旧价格平仓并撤单。SC0/SC_MAIN 是连续行情标识，不能等同于可成交合约。
         - 可用资金不足时模拟强平；仅检查每分钟结束时的风险，不模拟盘中逐笔强平或涨跌停无法成交。
         - 图表：滚轮 / ↑↓ 缩放，拖动查看历史，←→ 移动十字光标，End 返回最新，双击复位。主图 MA / BOLL / EXPMA，副图 MACD / KDJ / RSI / W&R / CCI / 成交量；参数在图内设置。指标按已载入最多 6,000 根 K 线计算，EMA/SMA 类指标受起算点影响，与同花顺历史起算点不同时可能略有差异。
+        - 下一根先补完当前形成中的 K 线，此后每次展示下一根完整 K 线；撮合仍逐分钟执行。日线按数据中的交易日合并夜盘和日盘；盘中周期按北京时间整点分桶，休市间隔分开。
         - 回放只向前推进，避免带仓倒退。设置只在开始新练习时生效；刷新或关闭页面可能丢失本次练习，请及时导出。
         """)
         if session.events:
@@ -231,14 +232,14 @@ def records_panel():
     
 
 
-visible = pd.concat([st.session_state.context, session.bars.iloc[:session.cursor+1]], ignore_index=True).tail(30000)
+visible = pd.concat([st.session_state.context, session.bars.iloc[:session.cursor+1]], ignore_index=True)
 frame = chart_bars(visible, step).tail(6000)
 long_qty = sum(lot.side == 1 for lot in account.positions)
 short_qty = sum(lot.side == -1 for lot in account.positions)
 reserved_long = sum(o['手数'] for o in session.orders if o['状态']=='待成交' and o.get('操作')=='平多')
 reserved_short = sum(o['手数'] for o in session.orders if o['状态']=='待成交' and o.get('操作')=='平空')
 event = trading_chart(frame, account.fills, account.positions, session.orders, st.session_state.chart_session_id, step, state=dict(
-    contract=str(bar.contract), equity=equity, returns=(equity/account.initial_cash-1)*100,
+    complete=session.candle_complete(step), net_pnl=equity-account.initial_cash, contract=str(bar.contract), equity=equity, returns=(equity/account.initial_cash-1)*100,
     available=account.available(price,spec), pnl=account.unrealized_pnl(price,spec),
     long=long_qty, short=short_qty, close_long=long_qty-reserved_long, close_short=short_qty-reserved_short,
     playing=st.session_state.playing, speed=st.session_state.speed, finished=session.finished,
@@ -268,11 +269,11 @@ if event and event.get('id') != st.session_state.get('last_event'):
                 st.session_state.notice = '已全部平仓并撤单'
             elif action in ('next','forward'):
                 st.session_state.playing = False
-                session.advance(step*(10 if action=='forward' else 1))
+                session.advance_candles(step, 10 if action=='forward' else 1)
             elif action == 'play':
                 st.session_state.playing = not st.session_state.playing
                 st.session_state.last_tick = clock.monotonic()
-            elif action == 'period' and event.get('value') in (1,5):
+            elif action == 'period' and event.get('value') in PERIODS:
                 st.session_state.period = event['value']
             elif action == 'speed' and event.get('value') in (1,2,5,10):
                 st.session_state.speed = event['value']
@@ -292,7 +293,7 @@ def playback_tick():
     if st.session_state.playing and not session.finished:
         interval = 1/st.session_state.speed
         if clock.monotonic()-st.session_state.last_tick >= max(0.5,interval):
-            session.advance(step*max(1,int(max(0.5,interval)/interval)))
+            session.advance_candles(step, max(1,int(max(0.5,interval)/interval)))
             st.session_state.last_tick = clock.monotonic()
             st.rerun()
 
